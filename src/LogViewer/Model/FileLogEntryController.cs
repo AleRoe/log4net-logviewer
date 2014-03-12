@@ -1,14 +1,15 @@
-﻿using LogViewer.Infrastructure;
+﻿using System.ComponentModel.Composition;
+using LogViewer.Infrastructure;
 using System;
 using System.Linq;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Threading;
 using System.Windows.Threading;
 
 namespace LogViewer.Model
 {
-    public class FileLogEntryController : INotifyPropertyChanged
+    [Export(typeof(ILogSource))]
+    public class FileLogEntryController : INotifyPropertyChanged, ILogSource
     {
         public event PropertyChangedEventHandler PropertyChanged;
 
@@ -20,30 +21,33 @@ namespace LogViewer.Model
 
         class WrappedDispatcher : DispatcherObject, IInvoker
         {
-            public WrappedDispatcher()
-            {
-            }
-
             public void Invoke(Action threadStart)
             {
                 Dispatcher.BeginInvoke(DispatcherPriority.Background,
                        threadStart);
             }
         }
-        Func<string, LogEntryParser, ILogFileWatcher> watcherFactory;
 
-        public FileLogEntryController(IInvoker dispatcher = null, Func<string, LogEntryParser, ILogFileWatcher> createLogFileWatcher = null, IPersist persist = null)
+        readonly Func<string, LogEntryParser, ILogFileWatcher> _watcherFactory;
+
+        public FileLogEntryController():
+            this(null,null,null)
         {
-            Entries = new ObservableCollection<LogEntryViewModel>();
-            this.watcherFactory = createLogFileWatcher??CreateLogFileWatcher;
-            wrappedDispatcher = dispatcher ?? new WrappedDispatcher();
-            Counter = new LogEntryCounter(Entries);
-            this.recentFileList = new RecentFileList(persist?? new XmlPersister(ApplicationAttributes.Get(),9));
+
         }
 
-        private ILogFileWatcher CreateLogFileWatcher(string value, LogEntryParser parser)
+        public FileLogEntryController(IInvoker dispatcher, Func<string, LogEntryParser, ILogFileWatcher> createLogFileWatcher , IPersist persist )
         {
-            return new Watcher(new FileWithPosition(value), parser, wrappedDispatcher);
+            Entries = new ObservableCollection<LogEntryViewModel>();
+            _watcherFactory = createLogFileWatcher??CreateLogFileWatcher;
+            wrappedDispatcher = dispatcher ?? new WrappedDispatcher();
+            Counter = new LogEntryCounter(Entries);
+            recentFileList = new RecentFileList(persist?? new XmlPersister(ApplicationAttributes.Get(),9));
+        }
+
+        private ILogFileWatcher CreateLogFileWatcher(string value, LogEntryParser logEntryParser)
+        {
+            return new Watcher(new FileWithPosition(value), logEntryParser, wrappedDispatcher);
         }
 
         private void WatchFile(string value)
@@ -53,7 +57,7 @@ namespace LogViewer.Model
                 watcher.Dispose();
                 watcher = null;
             }
-            watcher = watcherFactory(value, parser);
+            watcher = _watcherFactory(value, parser);
             watcher.LogEntry += AddToEntries;
             watcher.OutOfBounds += OutOfBounds;
             wrappedDispatcher.Invoke(() =>Entries.Clear());
